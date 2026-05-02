@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+
+# Data (important for your thesis)
+data/
+datasets/
+images/
+aljazeera/
+aljazeera/*/*.txt
+aljazeera/*/*/*.jpg
+
+*.zip
+*.zip
+scraped_content.zip
+# Models
+*.pt
+*.pth
+
+# Mac
+.DS_Store
+
+
