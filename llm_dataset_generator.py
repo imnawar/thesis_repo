@@ -1,39 +1,62 @@
+import random
 import pandas as pd
-import time
 from openai import OpenAI
 
-# 🔹 ================= CONFIG =================
-API_KEY = "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"
-MODEL = "gpt-4.1-mini"
-NUM_SAMPLES_TO_GENERATE = 500
-NUM_EXAMPLES = 5
+client = OpenAI()
 
-client = OpenAI(api_key=API_KEY)
+# ==============================
+# CONFIG
+# ==============================
 
+TOTAL_NEWS = 500
+BATCH_SIZE = 50
+NUM_BATCHES = TOTAL_NEWS // BATCH_SIZE
 
-# 🔹 ================= PROMPT BUILDER =================
+TOPICS = [
+    "سياسة", "اقتصاد", "رياضة", "صحة", "تعليم",
+    "بيئة", "تقنية", "ثقافة", "حوادث", "طاقة",
+    "مجتمع", "قضايا اجتماعية"
+]
 
-def build_few_shot_prompt(examples):
-    prompt = """
+ARAB_COUNTRIES = [
+    "السعودية", "مصر", "الإمارات", "قطر", "الكويت",
+    "البحرين", "عُمان", "الأردن", "المغرب", "تونس",
+    "الجزائر", "لبنان", "العراق"
+]
+
+# ==============================
+# PROMPT BUILDER
+# ==============================
+
+def build_few_shot_prompt(examples, topic, country):
+    prompt = f"""
 أنت نموذج لتوليد أخبار عربية واقعية بأسلوب صحفي احترافي.
 
-مهمتك:
-- التعلم من الأمثلة (الأسلوب فقط وليس المحتوى)
-- توليد خبر جديد مختلف تماماً
+🎯 المهمة:
+- توليد خبر جديد بالكامل (عنوان + وصف صورة)
+- يجب أن يكون مرتبطاً بالسياق العربي
 
-شروط مهمة:
-- يجب أن يكون كل خبر مختلف كلياً عن الأمثلة وعن أي خبر سابق
-- غيّر المجال (سياسة، اقتصاد، تقنية، صحة، رياضة، تعليم...)
-- غيّر الدولة أو المدينة
-- لا تكرر نفس الكلمات أو الصياغة
-- لا تعيد نفس الفكرة حتى بصياغة مختلفة
-- العنوان يجب أن يكون جذاباً ومحددًا
-- وصف الصورة يجب أن يعكس نفس الحدث بدقة
+📌 القيود المهمة:
+- المجال: {topic}
+- الدولة أو المنطقة: {country}
+
+⚠️ قواعد صارمة:
+- لا تكرر أي فكرة من الأمثلة
+- لا تستخدم نفس الأسماء أو الأحداث أو الأرقام
+- يجب أن يكون الخبر جديداً تماماً وغير مشابه لأي مثال
+- يجب تنويع المواضيع بشكل كبير داخل نفس المجال
+- تجنب التركيز على الذكاء الاصطناعي أو الإمارات بشكل متكرر
+- اجعل الأخبار واقعية لكن متنوعة جغرافياً داخل العالم العربي
 
 ---
 
-أمثلة:
+أمثلة للتعلم (الأسلوب فقط):
+
 """
+
+    # shuffle examples to avoid pattern memorization
+    examples = examples.sample(frac=1)
+
     for i, (_, row) in enumerate(examples.iterrows()):
         prompt += f"""
 مثال {i+1}:
@@ -50,93 +73,70 @@ def build_few_shot_prompt(examples):
 عنوان:
 وصف الصورة:
 """
+
     return prompt
 
 
-# 🔹 ================= LLM CALL =================
+# ==============================
+# GENERATION FUNCTION
+# ==============================
 
-def generate_text(prompt):
-    try:
+def generate_batch(examples, batch_size):
+    data = []
+
+    for i in range(batch_size):
+        topic = random.choice(TOPICS)
+        country = random.choice(ARAB_COUNTRIES)
+
+        prompt = build_few_shot_prompt(examples, topic, country)
+
         response = client.chat.completions.create(
-            model=MODEL,
+            model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "أنت كاتب أخبار عربي محترف"},
+                {"role": "system", "content": "أنت نموذج توليد أخبار عربية صحفية."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.9  # diversity
+            temperature=0.95,   # 🔥 high randomness
+            top_p=0.95
         )
 
-        return response.choices[0].message.content.strip()
+        text = response.choices[0].message.content
 
-    except Exception as e:
-        print("Error:", e)
-        return ""
+        try:
+            title = text.split("عنوان:")[1].split("وصف الصورة:")[0].strip()
+            caption = text.split("وصف الصورة:")[1].strip()
+        except:
+            title = text
+            caption = ""
 
-
-# 🔹 ================= PARSE OUTPUT =================
-
-def parse_generated_output(text):
-    title = ""
-    caption = ""
-
-    for line in text.split("\n"):
-        line = line.strip()
-
-        if line.startswith("عنوان"):
-            title = line.split(":")[-1].strip()
-
-        elif line.startswith("وصف"):
-            caption = line.split(":")[-1].strip()
-
-    return title, caption
-
-
-# 🔹 ================= GENERATION PIPELINE =================
-
-def generate_dataset(df):
-    results = []
-
-    for i in range(NUM_SAMPLES_TO_GENERATE):
-
-        # 🔥 sample few-shot examples
-        examples = df.sample(NUM_EXAMPLES)
-
-        prompt = build_few_shot_prompt(examples)
-
-        output = generate_text(prompt)
-
-        fake_title, fake_caption = parse_generated_output(output)
-
-        # 🔴 validation fallback
-        if not fake_title or not fake_caption:
-            print(f"Skipping sample {i+1} (empty output)")
-            continue
-
-        results.append({
-            "fake_title": fake_title,
-            "fake_caption": fake_caption,
-            "method": "dataset_few_shot_generation"
+        data.append({
+            "title": title,
+            "caption": caption,
+            "topic": topic,
+            "country": country
         })
 
-        print(f"Generated {i+1}/{NUM_SAMPLES_TO_GENERATE}")
-
-        time.sleep(1)
-
-    return pd.DataFrame(results)
+    return pd.DataFrame(data)
 
 
-# 🔹 ================= RUN =================
+# ==============================
+# MAIN LOOP (500 samples)
+# ==============================
 
-if __name__ == "__main__":
+all_data = []
 
-    df = pd.read_csv("real_news.csv")
+for batch_idx in range(NUM_BATCHES):
+    print(f"Generating batch {batch_idx + 1}/{NUM_BATCHES}...")
 
-    synthetic_df = generate_dataset(df)
+    # randomly sample few-shot examples per batch
+    batch_examples = examples.sample(n=min(5, len(examples)))
 
-    synthetic_df.to_csv(
-        "llm_dataset_generated_news.csv",
-        index=False,
-        encoding="utf-8-sig"
-    )
+    batch_df = generate_batch(batch_examples, BATCH_SIZE)
+    all_data.append(batch_df)
 
-    print("\nDone! Dataset saved: llm_dataset_generated_news.csv")
+final_df = pd.concat(all_data, ignore_index=True)
+
+# save dataset
+final_df.to_csv("fake_news_500_diverse.csv", index=False, encoding="utf-8-sig")
+
+print("Done! Dataset saved.")
