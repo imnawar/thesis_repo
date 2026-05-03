@@ -128,6 +128,9 @@ all_data = []
 for batch_idx in range(NUM_BATCHES):
     print(f"Generating batch {batch_idx + 1}/{NUM_BATCHES}...")
 
+
+    examples = pd.read_csv("real_news.csv")  # <-- few-shot dataset
+
     # randomly sample few-shot examples per batch
     batch_examples = examples.sample(n=min(5, len(examples)))
 
