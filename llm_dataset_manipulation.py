@@ -6,7 +6,7 @@ from openai import OpenAI
 
 # ================= CONFIG =================
 
-API_KEY = "YOUR_API_KEY"
+API_KEY = "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"
 MODEL = "gpt-4.1-mini"
 
 LIMIT = 1500
