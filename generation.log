@@ -520,3 +520,53 @@
 2026-05-22 00:13:11,935 [INFO] HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
 2026-05-22 00:13:11,953 [INFO] ✅ Batch 10 saved (50 items) → checkpoints/batch_10.csv
 2026-05-22 00:13:11,972 [INFO] 🎉 Done! 500 samples saved → 'fake_news_500_diverse.csv'
+2026-06-10 03:48:34,272 [INFO] Loaded 6471 real news examples from 'real_news.csv'.
+2026-06-10 03:48:34,273 [INFO] Batch 1/10: checkpoint found, skipping.
+2026-06-10 03:48:34,275 [INFO] Batch 2/10: checkpoint found, skipping.
+2026-06-10 03:48:34,277 [INFO] Batch 3/10: checkpoint found, skipping.
+2026-06-10 03:48:34,278 [INFO] Batch 4/10: checkpoint found, skipping.
+2026-06-10 03:48:34,279 [INFO] Batch 5/10: checkpoint found, skipping.
+2026-06-10 03:48:34,280 [INFO] Batch 6/10: checkpoint found, skipping.
+2026-06-10 03:48:34,281 [INFO] Batch 7/10: checkpoint found, skipping.
+2026-06-10 03:48:34,282 [INFO] Batch 8/10: checkpoint found, skipping.
+2026-06-10 03:48:34,283 [INFO] Batch 9/10: checkpoint found, skipping.
+2026-06-10 03:48:34,284 [INFO] Batch 10/10: checkpoint found, skipping.
+2026-06-10 03:48:34,294 [INFO] 🎉 Done! 500 samples saved → 'fake_news_500_diverse.csv'
+2026-06-10 03:48:34,295 [INFO] 📊 Topic distribution:
+topic
+تعليم             51
+تقنية             51
+طاقة              49
+بيئة              47
+رياضة             44
+حوادث             43
+سياسة             40
+مجتمع             40
+اقتصاد            38
+قضايا اجتماعية    36
+صحة               36
+ثقافة             25
+2026-06-10 03:48:34,295 [INFO] 📊 Country distribution:
+country
+السودان      32
+المغرب       31
+سوريا        30
+الجزائر      29
+لبنان        27
+الصومال      25
+عُمان        25
+تونس         25
+ليبيا        25
+جزر القمر    24
+فلسطين       24
+الكويت       23
+قطر          21
+مصر          21
+الأردن       20
+السعودية     19
+البحرين      19
+جيبوتي       19
+اليمن        19
+الإمارات     15
+العراق       14
+موريتانيا    13
