@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 # ==============================
 # CONFIG
 # ==============================
-TOTAL_NEWS      = 500
+TOTAL_NEWS      = 1500
 BATCH_SIZE      = 50
 NUM_BATCHES     = TOTAL_NEWS // BATCH_SIZE
 MAX_WORKERS     = 5          # parallel API calls per batch

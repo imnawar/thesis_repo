@@ -25,16 +25,25 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Silence noisy third-party SDK logs (httpx request lines + AFC notices).
+# These are emitted at INFO level by the google-genai SDK and its HTTP
+# client on every single API call, which floods the log when running
+# thousands of generations across multiple threads. We only want OUR
+# own progress/warning/error messages to show up.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("google_genai").setLevel(logging.WARNING)
+
 # ==============================
 # CONFIG
 # ==============================
-TOTAL_NEWS      = 500
+TOTAL_NEWS      = 1500
 BATCH_SIZE      = 50
 NUM_BATCHES     = TOTAL_NEWS // BATCH_SIZE
 MAX_WORKERS     = 3          # reduced to avoid overwhelming the API with 503s
 MAX_RETRIES     = 5          # more retries to handle 503 demand spikes
 INPUT_CSV       = "real_news.csv"
-OUTPUT_CSV      = "fake_news_500_gemini.csv"
+OUTPUT_CSV      = "fake_news_1500_gemini.csv"
 CHECKPOINT_DIR  = Path("checkpoints_gemini")
 CHECKPOINT_DIR.mkdir(exist_ok=True)
 

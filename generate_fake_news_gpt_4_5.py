@@ -3,7 +3,7 @@ import random
 import time
 import logging
 import pandas as pd
-from openai import OpenAI
+from openai import OpenAI, APIStatusError
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -11,17 +11,15 @@ from pathlib import Path
 # CONFIG
 # ==============================
 
-# API_KEY = "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"
-
-API_KEY         = os.getenv("OPENAI_API_KEY", "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")  # ✅ Use env var, never hardcode
-MODEL           = "gpt-4.5-preview"                                  # ✅ Updated to GPT-4.5
-TOTAL_NEWS      = 500
+API_KEY = os.getenv("OPENAI_API_KEY")  # ✅ Must be set as an environment variable, no hardcoded fallback
+MODEL           = "gpt-4.1"                                          # ✅ gpt-4.5-preview was removed from the API on 2025-07-14; gpt-4.1 is the recommended replacement
+TOTAL_NEWS      = 1500
 BATCH_SIZE      = 50
 NUM_BATCHES     = TOTAL_NEWS // BATCH_SIZE
 MAX_WORKERS     = 5
 MAX_RETRIES     = 3
 INPUT_CSV       = "real_news.csv"
-OUTPUT_CSV      = "fake_news_500_diverse.csv"
+OUTPUT_CSV      = "fake_news_1500_gpt-4_1.csv"
 CHECKPOINT_DIR  = Path("checkpoints")
 CHECKPOINT_DIR.mkdir(exist_ok=True)
 
@@ -155,6 +153,23 @@ def generate_single(args: tuple) -> dict | None:
                 "country": country
             }
 
+        except APIStatusError as e:
+            # ✅ Fail fast on permanent errors (bad model name, no access, bad auth, bad request)
+            # instead of burning retries/time on something that will never succeed.
+            if e.status_code in (404, 401, 403, 400):
+                logger.error(
+                    f"❌ Item {item_idx}: non-retryable API error "
+                    f"({e.status_code}): {e.message}. Not retrying."
+                )
+                return None
+
+            wait = 2 ** attempt + random.uniform(0, 1)  # ✅ Jitter to avoid thundering herd
+            logger.warning(
+                f"API error on item {item_idx} (attempt {attempt}/{MAX_RETRIES}): "
+                f"{e.status_code} {e.message}. Retrying in {wait:.1f}s…"
+            )
+            time.sleep(wait)
+
         except Exception as e:
             wait = 2 ** attempt + random.uniform(0, 1)  # ✅ Jitter to avoid thundering herd
             logger.warning(
@@ -202,7 +217,7 @@ def generate_batch(batch_idx: int, examples: pd.DataFrame, batch_size: int) -> p
 # ==============================
 def main():
     # ✅ Validate API key before running
-    if API_KEY == "YOUR_API_KEY_HERE":
+    if not API_KEY:
         raise EnvironmentError(
             "No API key set. Export it as: export OPENAI_API_KEY='sk-...'"
         )
