@@ -1,0 +1,273 @@
+import os
+import random
+import time
+import logging
+import pandas as pd
+from openai import OpenAI, APIStatusError
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+
+# ==============================
+# CONFIG
+# ==============================
+
+API_KEY = os.getenv("OPENAI_API_KEY")  # ✅ Must be set as an environment variable, no hardcoded fallback
+MODEL           = "gpt-4.1"                                          # ✅ gpt-4.5-preview was removed from the API on 2025-07-14; gpt-4.1 is the recommended replacement
+TOTAL_NEWS      = 1500
+BATCH_SIZE      = 50
+NUM_BATCHES     = TOTAL_NEWS // BATCH_SIZE
+MAX_WORKERS     = 5
+MAX_RETRIES     = 3
+INPUT_CSV       = "real_news.csv"
+OUTPUT_CSV      = "fake_news_1500_gpt-4_5.csv"
+CHECKPOINT_DIR  = Path("checkpoints")
+CHECKPOINT_DIR.mkdir(exist_ok=True)
+
+TOPICS = [
+    "سياسة", "اقتصاد", "رياضة", "صحة", "تعليم",
+    "بيئة", "تقنية", "ثقافة", "حوادث", "طاقة",
+    "مجتمع", "قضايا اجتماعية"
+]
+
+ARAB_COUNTRIES = [
+    "السعودية", "مصر", "الإمارات", "قطر", "الكويت",
+    "البحرين", "عُمان", "الأردن", "المغرب", "تونس",
+    "الجزائر", "لبنان", "العراق", "ليبيا", "سوريا",
+    "اليمن", "فلسطين", "الصومال", "جيبوتي",
+    "موريتانيا", "جزر القمر", "السودان"
+]
+
+# ==============================
+# LOGGING SETUP
+# ==============================
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler("generation.log", encoding="utf-8"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+client = OpenAI(api_key=API_KEY)
+
+# ==============================
+# PROMPT BUILDER
+# ==============================
+def build_few_shot_prompt(examples: pd.DataFrame, topic: str, country: str) -> str:
+    sampled = examples.sample(n=min(5, len(examples)))
+    examples_text = ""
+    for i, (_, row) in enumerate(sampled.iterrows()):
+        examples_text += f"""
+مثال {i+1}:
+عنوان: {row['title']}
+وصف الصورة: {row['caption']}
+"""
+
+    prompt = f"""أنت نموذج لتوليد أخبار عربية واقعية بأسلوب صحفي احترافي.
+
+🎯 المهمة:
+- توليد خبر جديد بالكامل (عنوان + وصف صورة)
+- يجب أن يكون مرتبطاً بالسياق العربي
+
+📌 القيود المهمة:
+- المجال: {topic}
+- الدولة أو المنطقة: {country}
+
+⚠️ قواعد صارمة:
+- لا تكرر أي فكرة من الأمثلة
+- لا تستخدم نفس الأسماء أو الأحداث أو الأرقام
+- يجب أن يكون الخبر جديداً تماماً وغير مشابه لأي مثال
+- يجب تنويع المواضيع بشكل كبير داخل نفس المجال
+- تجنب التركيز على الذكاء الاصطناعي أو الإمارات بشكل متكرر
+- اجعل الأخبار واقعية لكن متنوعة جغرافياً داخل العالم العربي
+
+---
+أمثلة للتعلم (الأسلوب فقط):
+{examples_text}
+---
+الآن قم بتوليد خبر جديد مختلف تماماً بالتنسيق التالي فقط:
+عنوان: ...
+وصف الصورة: ...
+"""
+    return prompt
+
+# ==============================
+# PARSE RESPONSE
+# ==============================
+def parse_response(text: str, item_idx: int) -> tuple[str, str]:
+    """Extract title and caption from model output. Returns (title, caption)."""
+    try:
+        title   = text.split("عنوان:")[1].split("وصف الصورة:")[0].strip()
+        caption = text.split("وصف الصورة:")[1].strip()
+
+        # ✅ Basic quality check
+        if len(title) < 10 or len(caption) < 10:
+            logger.warning(f"⚠️  Item {item_idx}: suspiciously short output — title={title!r}")
+
+        return title, caption
+
+    except (IndexError, ValueError) as e:
+        logger.warning(f"⚠️  Parse failed for item {item_idx}: {e} | Raw: {text[:200]!r}")
+        return text.strip(), ""
+
+# ==============================
+# SINGLE ITEM GENERATION (with retry + exponential backoff)
+# ==============================
+def generate_single(args: tuple) -> dict | None:
+    item_idx, examples, topic, country = args
+    prompt = build_few_shot_prompt(examples, topic, country)
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            response = client.chat.completions.create(
+                model=MODEL,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "أنت نموذج توليد أخبار عربية صحفية. "
+                            "أجب دائماً بالتنسيق المطلوب فقط دون أي مقدمات أو تعليقات."
+                        )
+                    },
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.95,
+                top_p=1.0,
+                max_tokens=300,         # ✅ Prevent runaway responses
+                timeout=30,             # ✅ Per-request timeout (seconds)
+            )
+
+            text           = response.choices[0].message.content.strip()
+            title, caption = parse_response(text, item_idx)
+
+            # ✅ Skip clearly failed parses
+            if not title or not caption:
+                raise ValueError("Empty title or caption after parsing")
+
+            return {
+                "title":   title,
+                "caption": caption,
+                "topic":   topic,
+                "country": country
+            }
+
+        except APIStatusError as e:
+            # ✅ Fail fast on permanent errors (bad model name, no access, bad auth, bad request)
+            # instead of burning retries/time on something that will never succeed.
+            if e.status_code in (404, 401, 403, 400):
+                logger.error(
+                    f"❌ Item {item_idx}: non-retryable API error "
+                    f"({e.status_code}): {e.message}. Not retrying."
+                )
+                return None
+
+            wait = 2 ** attempt + random.uniform(0, 1)  # ✅ Jitter to avoid thundering herd
+            logger.warning(
+                f"API error on item {item_idx} (attempt {attempt}/{MAX_RETRIES}): "
+                f"{e.status_code} {e.message}. Retrying in {wait:.1f}s…"
+            )
+            time.sleep(wait)
+
+        except Exception as e:
+            wait = 2 ** attempt + random.uniform(0, 1)  # ✅ Jitter to avoid thundering herd
+            logger.warning(
+                f"API error on item {item_idx} (attempt {attempt}/{MAX_RETRIES}): "
+                f"{type(e).__name__}: {e}. Retrying in {wait:.1f}s…"
+            )
+            time.sleep(wait)
+
+    logger.error(f"❌ Item {item_idx} failed after {MAX_RETRIES} attempts. Skipping.")
+    return None
+
+# ==============================
+# BATCH GENERATION (parallel)
+# ==============================
+def generate_batch(batch_idx: int, examples: pd.DataFrame, batch_size: int) -> pd.DataFrame:
+    tasks = [
+        (
+            batch_idx * batch_size + i,
+            examples.sample(n=min(5, len(examples))),
+            random.choice(TOPICS),
+            random.choice(ARAB_COUNTRIES)
+        )
+        for i in range(batch_size)
+    ]
+
+    results  = []
+    failed   = 0
+
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = {executor.submit(generate_single, task): task for task in tasks}
+        for future in as_completed(futures):
+            result = future.result()
+            if result is not None:
+                results.append(result)
+            else:
+                failed += 1
+
+    if failed:
+        logger.warning(f"Batch {batch_idx + 1}: {failed}/{batch_size} items failed.")
+
+    return pd.DataFrame(results)
+
+# ==============================
+# MAIN LOOP
+# ==============================
+def main():
+    # ✅ Validate API key before running
+    if not API_KEY:
+        raise EnvironmentError(
+            "No API key set. Export it as: export OPENAI_API_KEY='sk-...'"
+        )
+
+    if not Path(INPUT_CSV).exists():
+        raise FileNotFoundError(f"Input file not found: {INPUT_CSV}")
+
+    examples = pd.read_csv(INPUT_CSV)
+    logger.info(f"Loaded {len(examples)} real news examples from '{INPUT_CSV}'.")
+
+    # ✅ Validate required columns
+    required_cols = {"title", "caption"}
+    if not required_cols.issubset(examples.columns):
+        raise ValueError(f"Input CSV must contain columns: {required_cols}. Found: {set(examples.columns)}")
+
+    all_data = []
+
+    for batch_idx in range(NUM_BATCHES):
+        checkpoint_path = CHECKPOINT_DIR / f"batch_{batch_idx + 1}.csv"
+
+        if checkpoint_path.exists():
+            logger.info(f"Batch {batch_idx + 1}/{NUM_BATCHES}: checkpoint found, skipping.")
+            batch_df = pd.read_csv(checkpoint_path, encoding="utf-8-sig")
+        else:
+            logger.info(f"Generating batch {batch_idx + 1}/{NUM_BATCHES} using {MODEL}…")
+            batch_df = generate_batch(batch_idx, examples, BATCH_SIZE)
+            batch_df.to_csv(checkpoint_path, index=False, encoding="utf-8-sig")
+            logger.info(f"✅ Batch {batch_idx + 1} saved ({len(batch_df)} items) → {checkpoint_path}")
+
+        all_data.append(batch_df)
+
+    # ✅ Combine, deduplicate, and report
+    final_df = pd.concat(all_data, ignore_index=True)
+    before   = len(final_df)
+    final_df = final_df.drop_duplicates(subset=["title"])
+    after    = len(final_df)
+
+    if before != after:
+        logger.info(f"🧹 Removed {before - after} duplicate titles. {after} unique samples remain.")
+
+    # ✅ Reset index and add ID column for traceability
+    final_df = final_df.reset_index(drop=True)
+    final_df.insert(0, "id", final_df.index + 1)
+
+    final_df.to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
+    logger.info(f"🎉 Done! {after} samples saved → '{OUTPUT_CSV}'")
+
+    # ✅ Summary stats
+    logger.info("📊 Topic distribution:\n" + final_df["topic"].value_counts().to_string())
+    logger.info("📊 Country distribution:\n" + final_df["country"].value_counts().to_string())
+
+if __name__ == "__main__":
+    main()
