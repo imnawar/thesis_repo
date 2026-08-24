@@ -1,0 +1,37 @@
+Split sizes -> train: 3981, val: 569, test: 1138
+/opt/anaconda3/envs/arabic_clip/lib/python3.11/site-packages/open_clip/factory.py:450: UserWarning: QuickGELU mismatch between final model config (quick_gelu=False) and pretrained tag 'openai' (quick_gelu=True).
+  warnings.warn(
+=== Step 1: Zero-shot M-CLIP baseline (on full data, for reference) ===
+Zero-shot M-CLIP: 100%|████████████████████| 5688/5688 [11:57<00:00,  7.93it/s]
+Zero-shot M-CLIP similarity AUC (fake detection): 0.2581
+
+=== Step 2: Cache embeddings for train/val/test ===
+Caching embeddings: 100%|████████████████████| 125/125 [03:19<00:00,  1.59s/it]
+Caching embeddings: 100%|██████████████████████| 18/18 [00:35<00:00,  1.96s/it]
+Caching embeddings: 100%|██████████████████████| 36/36 [00:51<00:00,  1.43s/it]
+
+=== Step 3: Train Branch-1 standalone classifier ===
+Epoch 1: train loss = 0.4005, val AUC = 0.9986
+Epoch 2: train loss = 0.0876, val AUC = 0.9999
+Epoch 3: train loss = 0.0425, val AUC = 1.0000
+Epoch 4: train loss = 0.0270, val AUC = 1.0000
+Epoch 5: train loss = 0.0191, val AUC = 1.0000
+Epoch 6: train loss = 0.0133, val AUC = 1.0000
+Epoch 7: train loss = 0.0104, val AUC = 1.0000
+Epoch 8: train loss = 0.0081, val AUC = 1.0000
+Epoch 9: train loss = 0.0065, val AUC = 1.0000
+Epoch 10: train loss = 0.0057, val AUC = 1.0000
+Epoch 11: train loss = 0.0044, val AUC = 1.0000
+Epoch 12: train loss = 0.0036, val AUC = 1.0000
+Epoch 13: train loss = 0.0029, val AUC = 1.0000
+Epoch 14: train loss = 0.0025, val AUC = 1.0000
+Epoch 15: train loss = 0.0023, val AUC = 1.0000
+Best val AUC: 1.0000 — restored best checkpoint.
+
+=== Step 4: Evaluate on held-out test set ===
+Branch-1 standalone classifier — test set results:
+  accuracy: 0.9930
+  precision: 1.0000
+  recall: 0.9842
+  f1: 0.9920
+  auc: 0.9998
