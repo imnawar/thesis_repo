@@ -1,0 +1,42 @@
+Split sizes -> train: 3981, val: 569, test: 1138
+=== Step 1: Zero-shot M-CLIP baseline (on full data, for reference) ===
+Zero-shot M-CLIP similarity AUC (fake detection): 0.2581
+
+=== Step 2: Cache embeddings for train/val/test ===
+
+=== Step 3: Train Branch-1 standalone classifier ===
+Epoch 1: train loss = 0.3818, val AUC = 0.9988
+Epoch 2: train loss = 0.0832, val AUC = 0.9999
+Epoch 3: train loss = 0.0408, val AUC = 1.0000
+Epoch 4: train loss = 0.0264, val AUC = 1.0000
+Epoch 5: train loss = 0.0195, val AUC = 1.0000
+Epoch 6: train loss = 0.0131, val AUC = 1.0000
+Epoch 7: train loss = 0.0107, val AUC = 1.0000
+Epoch 8: train loss = 0.0080, val AUC = 1.0000
+Epoch 9: train loss = 0.0064, val AUC = 1.0000
+Epoch 10: train loss = 0.0052, val AUC = 1.0000
+Epoch 11: train loss = 0.0043, val AUC = 1.0000
+Epoch 12: train loss = 0.0037, val AUC = 1.0000
+Epoch 13: train loss = 0.0030, val AUC = 1.0000
+Epoch 14: train loss = 0.0025, val AUC = 1.0000
+Epoch 15: train loss = 0.0020, val AUC = 1.0000
+Best val AUC: 1.0000 — restored best checkpoint.
+
+=== Step 4: Evaluate on held-out test set ===
+Branch-1 standalone classifier — test set results:
+  accuracy: 0.9947
+  precision: 0.9883
+  recall: 1.0000
+  f1: 0.9941
+  auc: 0.9999
+
+=== Step 5: Diagnostics — run BEFORE trusting the result above ===
+-- Unimodal ablations --
+image-ONLY classifier test AUC: 0.9801
+text-ONLY classifier test AUC: 0.9471
+
+-- Train/test image leakage check --
+Unique images in train: 3874
+Unique images in test: 1130
+Duplicate images between train and test: 58
+WARNING: train/test image leakage detected — the classifier result above is not trustworthy until this is fixed (e.g. by deduplicating before the split, or splitting by unique image rather than by row).

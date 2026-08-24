@@ -105,6 +105,11 @@ def split_data(df, test_size=0.2, val_size=0.1, seed=42):
     """
     Stratified split so real/fake ratio is preserved in each split.
     test_size and val_size are both fractions of the FULL dataset.
+
+    NOTE: this row-level split does NOT prevent the same image file from
+    appearing in more than one split (common if your dataset reuses images
+    across multiple articles/captions). Use split_data_no_leakage() instead
+    if check_train_test_image_overlap() reports any duplicates.
     """
     train_val, test = train_test_split(
         df, test_size=test_size, stratify=df["label"], random_state=seed
@@ -116,6 +121,51 @@ def split_data(df, test_size=0.2, val_size=0.1, seed=42):
     )
     print(f"Split sizes -> train: {len(train)}, val: {len(val)}, test: {len(test)}")
     return train.reset_index(drop=True), val.reset_index(drop=True), test.reset_index(drop=True)
+
+
+def split_data_no_leakage(df, test_size=0.2, val_size=0.1, seed=42):
+    """
+    Same goal as split_data(), but groups by image CONTENT HASH first, so
+    every row sharing the same underlying image file ends up in the same
+    split. Prevents the train/test image leakage flagged by
+    check_train_test_image_overlap(). Use this version once leakage has
+    been detected.
+    """
+    import hashlib
+    from sklearn.model_selection import GroupShuffleSplit
+
+    def file_hash(path):
+        try:
+            with open(path, "rb") as f:
+                return hashlib.md5(f.read()).hexdigest()
+        except Exception as e:
+            print(f"Could not hash {path}, dropping row: {e}")
+            return None
+
+    df = df.copy()
+    df["_image_hash"] = df["image_path"].apply(file_hash)
+    before = len(df)
+    df = df.dropna(subset=["_image_hash"]).reset_index(drop=True)
+    if len(df) < before:
+        print(f"Dropped {before - len(df)} rows with unreadable images before splitting.")
+
+    gss1 = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=seed)
+    train_val_idx, test_idx = next(gss1.split(df, groups=df["_image_hash"]))
+    train_val, test = df.iloc[train_val_idx], df.iloc[test_idx]
+
+    val_fraction_of_train_val = val_size / (1 - test_size)
+    gss2 = GroupShuffleSplit(n_splits=1, test_size=val_fraction_of_train_val, random_state=seed)
+    train_idx, val_idx = next(gss2.split(train_val, groups=train_val["_image_hash"]))
+    train, val = train_val.iloc[train_idx], train_val.iloc[val_idx]
+
+    for name, split in [("train", train), ("val", val), ("test", test)]:
+        rate = split["label"].mean()
+        print(f"{name}: {len(split)} rows, fake rate = {rate:.3f}")
+
+    train = train.drop(columns=["_image_hash"]).reset_index(drop=True)
+    val = val.drop(columns=["_image_hash"]).reset_index(drop=True)
+    test = test.drop(columns=["_image_hash"]).reset_index(drop=True)
+    return train, val, test
 
 
 # ---------------------------------------------------------------------------
@@ -431,11 +481,88 @@ def evaluate_classifier(classifier, test_cache, threshold=0.5):
 
 
 # ---------------------------------------------------------------------------
+# 5. DIAGNOSTICS — run these BEFORE trusting the Branch-1 classifier result.
+#    A near-perfect AUC right after a below-random zero-shot baseline is a
+#    red flag for shortcut learning (e.g. the model fingerprinting image
+#    source/generator instead of checking text-image consistency) or for
+#    train/test data leakage. Run both checks below and inspect the numbers
+#    before reporting the classifier result in your thesis.
+# ---------------------------------------------------------------------------
+def train_unimodal_classifier(train_cache, val_cache, test_cache, modality="image",
+                               epochs=15, lr=1e-3):
+    """
+    Trains a classifier using ONLY one modality's embedding, to check
+    whether the full classifier's near-perfect score is coming from a
+    single modality alone rather than actual cross-modal consistency.
+    modality: "image" or "text"
+    """
+    embed_dim = train_cache.img_feats.shape[1]
+    clf = nn.Sequential(
+        nn.Linear(embed_dim, 128), nn.ReLU(), nn.Dropout(0.2), nn.Linear(128, 1)
+    ).to(DEVICE)
+    optimizer = torch.optim.AdamW(clf.parameters(), lr=lr)
+    criterion = nn.BCEWithLogitsLoss()
+
+    def get_feats(cache):
+        return (cache.img_feats if modality == "image" else cache.txt_feats).to(DEVICE)
+
+    train_feats = get_feats(train_cache)
+    train_labels = train_cache.labels.to(DEVICE)
+
+    for epoch in range(epochs):
+        clf.train()
+        logits = clf(train_feats).squeeze(-1)   # FIX: (N,1) -> (N,) to match labels
+        loss = criterion(logits, train_labels)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+    clf.eval()
+    with torch.no_grad():
+        test_probs = torch.sigmoid(clf(get_feats(test_cache)).squeeze(-1)).cpu().numpy()
+    auc = roc_auc_score(test_cache.labels.numpy(), test_probs)
+    print(f"{modality}-ONLY classifier test AUC: {auc:.4f}")
+    return auc
+
+
+def check_train_test_image_overlap(train_df, test_df):
+    """
+    Checks whether any image FILE (by content hash, not just path string)
+    appears in both train and test. Any overlap here invalidates the
+    classifier result — the model could be memorizing specific images
+    rather than learning a generalizable pattern.
+    """
+    import hashlib
+
+    def file_hash(path):
+        try:
+            with open(path, "rb") as f:
+                return hashlib.md5(f.read()).hexdigest()
+        except Exception as e:
+            print(f"Could not hash {path}: {e}")
+            return None
+
+    train_hashes = set(train_df["image_path"].apply(file_hash)) - {None}
+    test_hashes = set(test_df["image_path"].apply(file_hash)) - {None}
+    overlap = train_hashes & test_hashes
+
+    print(f"Unique images in train: {len(train_hashes)}")
+    print(f"Unique images in test: {len(test_hashes)}")
+    print(f"Duplicate images between train and test: {len(overlap)}")
+    if overlap:
+        print("WARNING: train/test image leakage detected — the classifier "
+              "result above is not trustworthy until this is fixed (e.g. by "
+              "deduplicating before the split, or splitting by unique image "
+              "rather than by row).")
+    return overlap
+
+
+# ---------------------------------------------------------------------------
 # Example usage
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     df = load_data()
-    train_df, val_df, test_df = split_data(df)
+    train_df, val_df, test_df = split_data_no_leakage(df)  # was split_data(df) — grouped by image hash to remove leakage
 
     text_model, text_tokenizer, image_model, image_preprocess = load_models()
 
@@ -461,6 +588,14 @@ if __name__ == "__main__":
 
     print("\n=== Step 4: Evaluate on held-out test set ===")
     evaluate_classifier(classifier, test_cache)
+
+    print("\n=== Step 5: Diagnostics — run BEFORE trusting the result above ===")
+    print("-- Unimodal ablations --")
+    train_unimodal_classifier(train_cache, val_cache, test_cache, modality="image")
+    train_unimodal_classifier(train_cache, val_cache, test_cache, modality="text")
+
+    print("\n-- Train/test image leakage check --")
+    check_train_test_image_overlap(train_df, test_df)
 
 # ---------------------------------------------------------------------------
 # NOTES
