@@ -10,6 +10,9 @@ images/
 aljazeera/
 aljazeera/*/*.txt
 aljazeera/*/*/*.jpg
+*/*.jpg
+*/*.png
+
 
 *.zip
 *.zip
