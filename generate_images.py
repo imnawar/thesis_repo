@@ -8,7 +8,7 @@ are skipped, and progress is checkpointed to disk after every image.
 
 Usage:
     export GEMINI_API_KEY="your-key-here"
-    python generate_images.py --csv fake_news_merged.csv --max-rows 100
+    python generate_images.py --csv fake_news_500_diverse.csv --max-rows 100
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ class Config:
     model_id: str = "gemini-3.1-flash-image-preview"
     max_attempts: int = 3
     base_sleep: float = 1.5          # sleep between successful requests
-    max_rows: int = 3000
+    max_rows: int = 4431
     log_file: str = "generation.log"
 
     @property
@@ -214,13 +214,20 @@ def run_automation(cfg: Config) -> None:
     for col, default in (("generated_image_path", ""), ("quality_tier", "")):
         if col not in df.columns:
             df[col] = default
+        # Force object dtype so later string assignments (df.at[idx, col] = "...")
+        # never hit pandas' "column is float64 because it was all NaN" trap.
+        df[col] = df[col].astype(object)
 
     # ---- Resume support: reload existing output CSV if present ----
     if os.path.exists(cfg.output_csv):
         prior = pd.read_csv(cfg.output_csv)
         if len(prior) == len(df):
-            df["generated_image_path"] = prior["generated_image_path"]
-            df["quality_tier"] = prior["quality_tier"]
+            df["generated_image_path"] = prior["generated_image_path"].astype(object).where(
+                prior["generated_image_path"].notna(), ""
+            )
+            df["quality_tier"] = prior["quality_tier"].astype(object).where(
+                prior["quality_tier"].notna(), ""
+            )
             logger.info("Resumed from existing output CSV (%s).", cfg.output_csv)
 
     logger.info("Processing %d rows...", len(df))
@@ -281,7 +288,7 @@ def parse_args() -> Config:
     p = argparse.ArgumentParser(description="Generate fake-news images from a CSV dataset.")
     p.add_argument("--csv", default="fake_news_merged.csv", help="Input CSV path")
     p.add_argument("--output-dir", default="generated_images", help="Output directory")
-    p.add_argument("--max-rows", type=int, default=3000, help="Max rows to process")
+    p.add_argument("--max-rows", type=int, default=4432, help="Max rows to process")
     p.add_argument("--sleep", type=float, default=1.5, help="Seconds between requests")
     p.add_argument("--attempts", type=int, default=3, help="Retries per row")
     p.add_argument("--model", default="gemini-3.1-flash-image-preview", help="Model ID")

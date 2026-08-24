@@ -97,4 +97,4 @@ if __name__ == "__main__":
     print("Total samples:", len(df))
     print(df.head())
 
-    df.to_csv("real_news.csv", index=False, encoding="utf-8-sig")
+    df.to_csv("real_news1.csv", index=False, encoding="utf-8-sig")
