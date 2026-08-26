@@ -1,0 +1,55 @@
+train: 3992 rows, real-news rate = 0.558
+val: 563 rows, real-news rate = 0.533
+test: 1133 rows, real-news rate = 0.560
+=== Step 1: Zero-shot M-CLIP baseline (on full data, for reference) ===
+Zero-shot M-CLIP similarity — results (positive class = real news):
+  threshold: inf
+  accuracy: 0.4437
+  precision: 0.0000
+  recall: 0.0000
+  auc: 0.2581
+
+=== Step 2: Cache embeddings for train/val/test ===
+
+=== Step 3: Train Branch-1 standalone classifier ===
+Epoch 1: train loss = 0.3897, val AUC = 0.9986
+Epoch 2: train loss = 0.0864, val AUC = 0.9996
+Epoch 3: train loss = 0.0392, val AUC = 0.9999
+Epoch 4: train loss = 0.0245, val AUC = 0.9999
+Epoch 5: train loss = 0.0167, val AUC = 0.9999
+Epoch 6: train loss = 0.0117, val AUC = 1.0000
+Epoch 7: train loss = 0.0093, val AUC = 1.0000
+Epoch 8: train loss = 0.0071, val AUC = 1.0000
+Epoch 9: train loss = 0.0054, val AUC = 1.0000
+Epoch 10: train loss = 0.0048, val AUC = 1.0000
+Epoch 11: train loss = 0.0037, val AUC = 1.0000
+Epoch 12: train loss = 0.0031, val AUC = 1.0000
+Epoch 13: train loss = 0.0026, val AUC = 1.0000
+Epoch 14: train loss = 0.0022, val AUC = 1.0000
+Epoch 15: train loss = 0.0018, val AUC = 1.0000
+Best val AUC: 1.0000 — restored best checkpoint.
+
+=== Step 4: Evaluate on held-out test set ===
+Branch-1 standalone classifier — test set results:
+  accuracy: 0.9921
+  precision: 0.9937
+  recall: 0.9921
+  f1: 0.9929
+  auc: 0.9998
+
+=== Zero-shot vs. classifier (positive class = real news) ===
+metric      zero-shot   classifier
+accuracy       0.4437       0.9921
+precision      0.0000       0.9937
+recall         0.0000       0.9921
+auc            0.2581       0.9998
+
+=== Step 5: Diagnostics — run BEFORE trusting the result above ===
+-- Unimodal ablations --
+image-ONLY classifier test AUC: 0.9819
+text-ONLY classifier test AUC: 0.9423
+
+-- Train/test image leakage check --
+Unique images in train: 3834
+Unique images in test: 1096
+Duplicate images between train and test: 0
